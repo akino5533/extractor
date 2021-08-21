@@ -1,0 +1,142 @@
+ExaTENSOR development list (D.I.L.):
+===================================
+
+FEATURES NEEDED:
+ 2018/09/28: Tensor addition with permutation and conjugation needs to be implemented in TAL-SH:
+             CP-TAL: tensor addition with permutation is missing;
+             NV-TAL: tensor addition with conjugation is missing.
+ 2018/10/26: TAL-SH should introduce additional layers on top of eager API inferace:
+             Lazy layer: Placing tasks into the global queue, decomposing too large tasks
+             into smaller tasks plus auxiliary operations, aggregating smaller tasks into
+             task graphs, binding tasks to basic execution units based on task attributes
+             and data locality, reusing tensor images between tasks (communication minimization), etc.
+ 2019/02/05: ExaTENSOR: New tensor operations:
+             - exatns_tensor_copy(): Copy with or without index permutation;
+             - exatns_tensor_add(): Addition with or without index permutation;
+             - exatns_tensor_slice(): Slice extraction with or without index permutation;;
+             - exatns_tensor_insert(): Slice insertion with or without index permutation;;
+             - exatns_tensor_product(): Kronecker, Hadamard, Khatri-Rao products;
+             - exatns_tensor_contract_general(): Mix of pairwise contractions and products.
+ 2019/02/14: Add control field to TENS_CREATE:
+             - List of tensor dimensions that may be split;
+             - List of tensor dimensions that may be distributed if split.
+
+
+UNRESOLVED ISSUES:
+ 2018/03/07: Implement tensor R/W status update (in the tensor cache) at the TAVP-MNG level:
+             Dependency check and status update on instruction issue should be done during location cycle;
+             Status update on instruction retirement will probably require another rotation cycle,
+             for example via opening an additional port in Locator for instructions from Collector,
+             or it may be implemented via remote MPI atomics (remotely accesible R/W counters).
+ 2018/03/07: At the bottom TAVP-MNG level it is unclear how to implement replication within a group of the
+             TAVP-WRK processes belonging to the same TAVP-MNG process. Perhaps argument renaming and
+             replication under modified names provides an acceptable solution:
+             T12(a,b,i,j) --> T12$0, T12$1, T12$2, etc. Note that later the output tensor name substitution
+             may additionally mangle the name: T12 --> T12#0 (accumulator), T12#1, T12#2, ... (temporary).
+             Thus, combined will give: T12 (original) --> T12$1 (replica) --> T12$1#3 (temporary replica).
+ 2018/08/20: Temporary (output) tensors should be reused if they are already on an accelerator.
+ 2018/09/12: Tensor transformation requires MPI_PUT and MPI_GET for output tensor arguments:
+             Get output tensor argument --> Transform it locally --> Put output tensor argument.
+             Tensor initialization requires MPI_PUT. Tensor operations with INOUT operands also
+             require MPI_GET + MPI_PUT mechanism on output operands.
+ 2018/10/26: Frequent small object allocations/deallocations should be replaced by GFC::bank factories.
+ 2018/12/26: DS Instruction class requires a new field called .stream, indicating which instruction stream
+             the DS instruction is following. Stream 0 is the default out-of-order stream. A stream with
+             a positive number indicates a sequence of dependent instructions to be executed in their
+             original order; all instructions from such a sequence will be marked with the same stream;
+             the last instruction in this sequence will have its stream number negated.
+ 2019/02/05: ExaTENSOR TAVP-MNG: Communication regularizer:
+             - Introduce a request counter for each tensor block (incremented during location cycle).
+               If the request counter exceeds certain threshold, defer tensor instruction.
+             - Order located tensor instructions by cumulative distance to their operands:
+               Distance to the operand = func(Distance to the owning MPI process, Operand size).
+ 2019/02/18: ExaTENSOR Resourcer: Give priority to instructions which do not require communication.
+ 2019/02/18: ExaTENSOR Communicator: Do not send multiple messages to the same MPI rank at a time.
+ 2019/03/06: TAL-SH multithreaded first touch in arg_buf_allocate on CPU.
+ 2019/04/23: Lazy locking has a bug: When detaching/deallocating data that participated in
+             one-sided communications, the corresponding windows need to be unlocked.
+ 2019/06/21: TENSOR CREATE may hit the memory limit block, in which case TAVP-WRK should either
+             report an error and quit or pass the TRY_LATER code up-level to its TAVP-MNG manager.
+
+
+RESOLVED:
+ 2019/06/21: When running CPU-only, Dispatcher will run through the entire queue to the end,
+             executing blocking issue calls, but without passing completed instructions further
+             to Communicator until the end of the queue is reached. In general, DSVU should pass
+             processed instructions to the next DSVU instantaneously, without waiting until all
+             current instructions have been processed and end of queue is reached.
+ 2019/03/06: TAL-SH: cuTensor integration: Add pattern converter and finish integration in NV-TAL.
+ 2019/03/06: talshTensorContractXL() function: All tensors are initially placed on Host. Blocking.
+ 2019/03/06: TAL-SH coherence control issue: Logic for output tensors is wrong in some cases, should be:
+             - Mark all tensor images unavailable in operation scheduling.
+             - Then by case:
+               - D: Discard all images except SRC (in operation scheduling);
+                    Discard SRC image after completion;
+               - M: Discard all images except SRC (in operation scheduling);
+                    Discard SRC image after completion;
+                    Append DST image after completion (available);
+               - T: Discard all images except SRC (in operation scheduling);
+                    Transfer DST to SRC (in operation);
+                    Mark SRC available after completion;
+               - K: Discard all images except SRC (in operation scheduling);
+                    Transfer DST to SRC (in operation);
+                    Mark SRC available after completion;
+                    Append DST image after completion (available).
+ 2019/03/06: TAL-SH: Add beta=0 (overwrite) option in talshTensorContract() and Tensor.contractAccumulate().
+ 2019/03/06: TAL-SH: Tensor C++ ctor with initialization data as a vector.
+ 2019/03/06: TAL-SH: Tensor C++: getDataAccessHost().
+ 2019/03/06: TAL-SH: Tensor C++: getVolume(), getDimExtents().
+ 2019/02/19: ExaTENSOR TAVP-WRK: Minimize NUMA issues on CPU:
+             - No initialization to zero for persistent and temporary tensors. Accumulators should be
+               initialized to zero in Dispatcher if not up-to-date (their up-to-date status is reset
+               upon each actual remote Accumulate operation, but Communicator will no longer nullify them).
+             - Perform tensor contractions in temporary tensors with beta=0. Other tensor operations may
+               need to initialize temporary tensors in Dispatcher prior to the operation.
+             - Perform local accumulations (temporary into accumulator) in Dispatcher with multi-threading.
+ 2019/02/18: ExaTENSOR: Allow HAB size to exceed memory limit.
+ 2019/01/18: ExaTENSOR: exatns_tensor_get_slice().
+ 2018/10/26: exatns_tensor_create() must be able to create tensor slices.
+ 2018/10/26: TAVP-MNG:Dispatcher should dispatch tensor instructions in bounded-size packets, thus
+             achieving load balancing. For this, retired tensor instruction packets must contain
+             a tag specifying which dispatch channel the packet came from.
+ 2018/10/26: Memory per MPI process needs to be specified in an environment variable and then read by ExaTENSOR.
+             Memory allocations/deallocations for tensors should be done via my custom memory allocator,
+             with a fallback to regular allocations in case the custom allocator is out of memory space.
+ 2018/09/28: Tensor contraction with conjugation needs to be implemented in NV-TAL.
+ 2018/04/24: TAVP_INSTR_CTRL_STOP should not be reordered with other instructions in TAVP-WRK:
+             It must reach each DSVU the last, that is, each DSVU must pass the STOP instruction as its last instruction.
+ 2018/04/09: It is not clear when to upload and when to destroy a local accumulator tensor: TMP_COUNT never decreases.
+             It looks like in the current TAVP-WRK implementation situations are possible where lookup_acc_tensor()
+             from TAVP-WRK:Resourcer:SubstituteOutput does not find the Accumulator tensor in the tensor cache while
+             seeing a non-zero TMP_COUNT on its persistent tensor, which causes a crash.
+ 2018/04/05: Universal memory allocator may now return an error code, but never TRY_LATER. The resource acquisition
+             member procedure in tens_resrc_t should somehow separate cases of TRY_LATER:
+             mem_allocate() -> tens_resrc_t.allocate_buffer() -> tens_oprnd_t.acquire_rsc() & tens_entry_wrk_t.acquire_resource() ->
+             -> tavp_wrk_resourcer_t.acquire_resource().
+ 2018/03/27: Subspace decomposition algorithm with alignment does not work properly: Example with alignment 5:
+             [50] -> [[20]+[30]] -> [[[10]+[10]]+[[25]+[5]]]
+ 2018/03/26: TAL-SH coherence control might not work properly when the same tensor is concurrently participating
+             in multiple tensor operations as an input. Needs to be checked.
+ 2014/07/07: Check GPU_UP before switching GPUs.
+ 2014/07/07: Add a scalar scaling factor to <tensor_block_contract> and <gpu_tensor_block_contract>.
+ 2014/01/04: Add concurrent kernel execution into tensor_block_contract_dlf_r4_ for input tensor transposes.
+             Discarded. I do not think there would be any significant performance gain.
+ 2014/05/13: Use "restricted" pointers in .cu files.
+ 2014/01/02: gpu_tensor_block_copy_dlf_r4__ kernel does too many divisions/modulo. Solved via tables.
+ 2013/12/30: No overlap observed between two tensor contractions set to different CUDA streams:
+             cudaEventRecord() calls lead to a serialization of the streams execution!
+ 2013/12/26: Seems like device pointers must be 64-bit aligned in order to get DMA work.
+ 2013/12/23: cudaHostAlloc() must use cudaHostAllocPortable flag!
+ 2013/12/19: GPU tensor transpose kernel still uses <int> instead of <size_t> for offsets. Fixed.
+ 2013/12/19: gpu_tensor_block_contract:
+             (a) the inversed destination tensor transpose must have inversed dimension order!
+             (b) cudaMemcpyToSymbolAsync will fail for permutations because they have local scope!
+                 The permutation must be allocated in the packet and incorporated into tensBlck_t.
+ 2013/12/04: I need to create a CUDA task pool (cuda_task_create, cuda_task_destroy).
+ 2013/10/31: Efficient tensor transpose on GPU: Definition of the minor index set:
+             (a) Minor input volume >= warpSize; (b) Minor output volume >= warpSize;
+             (c) Minor volume <= shared memory buffer size (but as close as possible).
+ 2013/07/17: If minor index sets differ && the last minor dimension(s) is(are) very long, split it(them).
+             Write a short paper on my algorithm for cache-efficient tensor transposes.
+ 2013/07/16: What should %scalar_value reflect when the tensor rank is higher than zero?
+             How to make the %data_real consistent with %data_cmplx8? Complex --> Real conversion done!
